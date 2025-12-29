@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.19] - 2024-12-29
+### Fixed
+- **Chat agent**: Use modern LangGraph `create_react_agent` instead of deprecated LangChain AgentExecutor
+  - Works across all LangChain versions (0.2.x and 0.3.x)
+  - Falls back to legacy AgentExecutor for older installations
+- **Dependencies**: Added `langgraph>=0.2.0` as core dependency
+
 ## [0.1.18] - 2024-12-29
 ### Fixed
 - **Chat agent**: Fixed `LangChain agent support not available` error

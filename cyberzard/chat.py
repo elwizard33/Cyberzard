@@ -9,21 +9,21 @@ import sys
 # --- LangChain/LangGraph agent integration ---
 import subprocess
 
-# Try importing from langchain (newer versions)
-_create_agent = None
-_AgentExecutor = None
+# Try importing agent creation - prefer langgraph (modern) over langchain (legacy)
+_create_react_agent = None
+_use_langgraph = False
 
 try:
-    from langchain.agents import create_openai_tools_agent, AgentExecutor
-    _create_agent = create_openai_tools_agent
-    _AgentExecutor = AgentExecutor
+    # Modern approach: LangGraph's prebuilt react agent
+    from langgraph.prebuilt import create_react_agent
+    _create_react_agent = create_react_agent
+    _use_langgraph = True
 except ImportError:
     try:
-        # Try alternate import paths
-        from langchain_core.agents import create_openai_tools_agent
-        from langchain.agents import AgentExecutor
-        _create_agent = create_openai_tools_agent
-        _AgentExecutor = AgentExecutor
+        # Legacy approach: LangChain's AgentExecutor
+        from langchain.agents import create_openai_tools_agent, AgentExecutor
+        _create_react_agent = (create_openai_tools_agent, AgentExecutor)
+        _use_langgraph = False
     except ImportError:
         pass  # Will be handled at runtime
 
@@ -130,26 +130,29 @@ def get_agent():
     global _agent
     if _agent is None:
         # Check if agent imports are available
-        if _create_agent is None or _AgentExecutor is None:
+        if _create_react_agent is None:
             raise ImportError(
-                "LangChain agent support not available. "
-                "Install with: pip install langchain langchain-openai"
+                "LangChain/LangGraph agent support not available. "
+                "Install with: pip install langgraph langchain-openai"
             )
         
         model = get_model()
         tools = [run_shell_command, debug_shell_command, complete_shell_command]
         system_prompt = "You are a helpful CLI agent that can run, debug, and complete shell commands. Use tools to assist the user."
         
-        # Build a proper chat prompt template for the tools agent
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            MessagesPlaceholder("messages"),
-            MessagesPlaceholder("agent_scratchpad"),
-        ])
-        
-        # Create the agent and wrap in executor
-        agent = _create_agent(model, tools=tools, prompt=prompt)
-        _agent = _AgentExecutor(agent=agent, tools=tools, verbose=False)
+        if _use_langgraph:
+            # Modern LangGraph approach - simpler and more reliable
+            _agent = _create_react_agent(model, tools, state_modifier=system_prompt)
+        else:
+            # Legacy LangChain approach
+            create_openai_tools_agent, AgentExecutor = _create_react_agent
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder("messages"),
+                MessagesPlaceholder("agent_scratchpad"),
+            ])
+            agent = create_openai_tools_agent(model, tools=tools, prompt=prompt)
+            _agent = AgentExecutor(agent=agent, tools=tools, verbose=False)
     return _agent
 
 def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 5, session_id: str = "default") -> None:
