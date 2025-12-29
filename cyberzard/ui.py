@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import os
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.theme import Theme
 from rich.text import Text
+from rich.prompt import Prompt, Confirm
 
 
 _THEME = Theme(
@@ -16,6 +19,8 @@ _THEME = Theme(
         "warn": "yellow",
         "err": "red",
         "info": "dim",
+        "highlight": "bold magenta",
+        "key": "bold green",
     }
 )
 
@@ -200,6 +205,328 @@ def render_email_fix(guide_markdown: str) -> None:
         print(guide_markdown[:8000])
 
 
+def check_ai_configured() -> Tuple[bool, Optional[str], Optional[str]]:
+    """Check if an AI provider is configured and ready.
+
+    Returns:
+        Tuple of (is_configured, provider_key, error_message)
+        - is_configured: True if a provider is fully configured
+        - provider_key: The active provider key if configured, None otherwise
+        - error_message: Human-readable error if not configured, None otherwise
+    """
+    from .models import ModelSelector, get_provider
+
+    selector = ModelSelector()
+    available = selector.detect_available_providers()
+
+    # Check for any fully configured provider
+    for provider_key, installed, has_key in available:
+        if installed and has_key:
+            return True, provider_key, None
+
+    # Determine what's missing
+    has_any_installed = any(installed for _, installed, _ in available)
+    has_any_key = any(has_key for _, _, has_key in available)
+
+    if not has_any_installed:
+        return False, None, "No AI provider packages installed. Install with: pip install cyberzard[openai]"
+
+    if not has_any_key:
+        # Find which providers are installed but missing keys
+        missing_keys = [
+            get_provider(pk).api_key_env
+            for pk, installed, has_key in available
+            if installed and not has_key
+        ]
+        return False, None, f"API key not set. Set one of: {', '.join(missing_keys)}"
+
+    return False, None, "No AI provider fully configured"
+
+
+def prompt_ai_setup(skip_if_configured: bool = True) -> Tuple[bool, Optional[str]]:
+    """Interactive prompt to set up AI provider.
+
+    Args:
+        skip_if_configured: If True, returns immediately if already configured
+
+    Returns:
+        Tuple of (success, provider_key)
+        - success: True if AI is now configured (or was already)
+        - provider_key: The active provider key, or None if setup failed/cancelled
+    """
+    from .models import ModelSelector, get_provider, list_providers
+
+    cons = _console()
+    selector = ModelSelector()
+
+    # Check current status
+    is_configured, active_provider, _ = check_ai_configured()
+    if is_configured and skip_if_configured:
+        return True, active_provider
+
+    available = selector.detect_available_providers()
+
+    # Show current status
+    cons.print()
+    cons.print(Panel(
+        Text("🤖 AI Provider Setup", style="title"),
+        border_style="cyan",
+        subtitle="Configure your AI model provider"
+    ))
+    cons.print()
+
+    # Build status table
+    table = Table(border_style="cyan", show_header=True)
+    table.add_column("Provider", style="cyan bold")
+    table.add_column("Package", style="dim")
+    table.add_column("Installed", justify="center")
+    table.add_column("API Key", justify="center")
+
+    installed_providers = []
+    for provider_key, installed, has_key in available:
+        info = get_provider(provider_key)
+        if not info:
+            continue
+
+        installed_icon = Text("✓", style="ok") if installed else Text("✗", style="err")
+        key_icon = Text("✓", style="ok") if has_key else Text("✗", style="warn")
+
+        table.add_row(
+            info.name,
+            info.package,
+            installed_icon,
+            key_icon,
+        )
+
+        if installed:
+            installed_providers.append((provider_key, info, has_key))
+
+    cons.print(table)
+    cons.print()
+
+    # If nothing installed, guide to install
+    if not installed_providers:
+        cons.print("[warn]No AI provider packages installed.[/warn]")
+        cons.print()
+        cons.print("Install a provider package:")
+        cons.print("  [cyan]pip install cyberzard[openai][/cyan]     # OpenAI (GPT)")
+        cons.print("  [cyan]pip install cyberzard[anthropic][/cyan]  # Anthropic (Claude)")
+        cons.print("  [cyan]pip install cyberzard[all][/cyan]        # All providers")
+        cons.print()
+        return False, None
+
+    # Find providers that need API keys
+    needs_key = [(pk, info) for pk, info, has_key in installed_providers if not has_key]
+
+    if not needs_key:
+        # All installed providers have keys - we're good!
+        default = selector.get_default_provider()
+        cons.print(f"[ok]✓ AI is configured![/ok] Active provider: [cyan]{default}[/cyan]")
+        return True, default
+
+    # Offer to set up an API key
+    cons.print("[warn]API key needed.[/warn] Choose a provider to configure:")
+    cons.print()
+
+    for i, (pk, info) in enumerate(needs_key, 1):
+        cons.print(f"  [{i}] {info.name} ({info.api_key_env})")
+
+    cons.print(f"  [0] Skip for now")
+    cons.print()
+
+    # Get user choice
+    try:
+        choice = Prompt.ask(
+            "Select provider",
+            choices=[str(i) for i in range(len(needs_key) + 1)],
+            default="1" if len(needs_key) == 1 else None,
+        )
+    except (KeyboardInterrupt, EOFError):
+        cons.print("\n[info]Setup cancelled.[/info]")
+        return False, None
+
+    if choice == "0":
+        cons.print("[info]Skipped AI setup. Some features will be limited.[/info]")
+        return False, None
+
+    # Get API key for selected provider
+    idx = int(choice) - 1
+    selected_key, selected_info = needs_key[idx]
+
+    cons.print()
+    cons.print(f"[title]Setting up {selected_info.name}[/title]")
+    cons.print()
+    cons.print(f"Get your API key from:")
+
+    # Provider-specific URLs
+    urls = {
+        "openai": "https://platform.openai.com/api-keys",
+        "anthropic": "https://console.anthropic.com/settings/keys",
+        "xai": "https://console.x.ai/",
+    }
+    url = urls.get(selected_key, "your provider's website")
+    cons.print(f"  [cyan]{url}[/cyan]")
+    cons.print()
+
+    try:
+        api_key = Prompt.ask(
+            f"Enter your {selected_info.api_key_env}",
+            password=True,  # Hide input
+        )
+    except (KeyboardInterrupt, EOFError):
+        cons.print("\n[info]Setup cancelled.[/info]")
+        return False, None
+
+    if not api_key or not api_key.strip():
+        cons.print("[warn]No key entered. Setup cancelled.[/warn]")
+        return False, None
+
+    api_key = api_key.strip()
+
+    # Set the environment variable for this session
+    os.environ[selected_info.api_key_env] = api_key
+
+    # Offer to save to shell profile
+    cons.print()
+    cons.print("[ok]✓ API key set for this session![/ok]")
+    cons.print()
+
+    save_permanent = Confirm.ask(
+        "Save to shell profile for future sessions?",
+        default=True,
+    )
+
+    if save_permanent:
+        saved_path = _save_to_shell_profile(selected_info.api_key_env, api_key)
+        if saved_path:
+            cons.print(f"[ok]✓ Saved to {saved_path}[/ok]")
+            cons.print(f"[info]Run [cyan]source {saved_path}[/cyan] or restart your terminal to apply.[/info]")
+        else:
+            cons.print("[warn]Could not auto-save. Add manually to your shell profile:[/warn]")
+            cons.print(f'  [cyan]export {selected_info.api_key_env}="{api_key[:8]}..."[/cyan]')
+
+    cons.print()
+    cons.print(f"[ok]✓ {selected_info.name} is now configured![/ok]")
+
+    return True, selected_key
+
+
+def _save_to_shell_profile(env_var: str, value: str) -> Optional[str]:
+    """Save an environment variable to the user's shell profile.
+
+    Args:
+        env_var: Environment variable name
+        value: Value to set
+
+    Returns:
+        Path to the file that was modified, or None if failed
+    """
+    import os
+    from pathlib import Path
+
+    home = Path.home()
+
+    # Determine which shell profile to use
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        profile_candidates = [home / ".zshrc", home / ".zprofile"]
+    elif "bash" in shell:
+        profile_candidates = [home / ".bashrc", home / ".bash_profile", home / ".profile"]
+    else:
+        profile_candidates = [home / ".profile", home / ".bashrc"]
+
+    # Find existing profile or create .profile
+    target = None
+    for candidate in profile_candidates:
+        if candidate.exists():
+            target = candidate
+            break
+
+    if target is None:
+        target = profile_candidates[0]  # Create the first candidate
+
+    try:
+        # Check if already exists in file
+        export_line = f'export {env_var}="{value}"'
+
+        if target.exists():
+            content = target.read_text()
+            # Check if this env var is already set (to avoid duplicates)
+            if f"export {env_var}=" in content:
+                # Replace existing line
+                lines = content.splitlines()
+                new_lines = []
+                for line in lines:
+                    if line.strip().startswith(f"export {env_var}="):
+                        new_lines.append(export_line)
+                    else:
+                        new_lines.append(line)
+                target.write_text("\n".join(new_lines) + "\n")
+                return str(target)
+
+        # Append new export
+        with target.open("a") as f:
+            f.write(f"\n# Cyberzard AI provider key\n{export_line}\n")
+
+        return str(target)
+
+    except Exception:
+        return None
+
+
+def ensure_ai_configured(
+    require: bool = False,
+    prompt_setup: bool = True,
+    command_name: str = "this command",
+) -> Tuple[bool, Optional[str]]:
+    """Ensure AI is configured, optionally prompting for setup.
+
+    This is the main entry point for commands that need AI.
+
+    Args:
+        require: If True, exit with error if AI not configured after prompt
+        prompt_setup: If True, offer interactive setup when not configured
+        command_name: Name of the command (for error messages)
+
+    Returns:
+        Tuple of (is_configured, provider_key)
+    """
+    is_configured, provider, error = check_ai_configured()
+
+    if is_configured:
+        return True, provider
+
+    cons = _console()
+
+    # Check if we're in interactive mode
+    interactive = sys.stdout.isatty() and sys.stdin.isatty()
+
+    if interactive and prompt_setup:
+        cons.print()
+        cons.print(f"[warn]⚠ AI provider not configured.[/warn] {command_name} works best with AI.")
+        cons.print()
+
+        setup_now = Confirm.ask("Set up an AI provider now?", default=True)
+        if setup_now:
+            success, provider = prompt_ai_setup(skip_if_configured=False)
+            if success:
+                return True, provider
+
+    # Not configured and either non-interactive or user declined
+    if require:
+        cons.print()
+        cons.print(f"[err]✗ AI provider required for {command_name}.[/err]")
+        cons.print()
+        cons.print("Configure with one of:")
+        cons.print("  [cyan]cyberzard config[/cyan]     # Interactive setup")
+        cons.print("  [cyan]export OPENAI_API_KEY=sk-...[/cyan]")
+        cons.print("  [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]")
+        cons.print()
+        raise SystemExit(1)
+
+    return False, None
+
+
 __all__ = [
     "render_scan_output",
     "render_advice_output",
@@ -207,4 +534,8 @@ __all__ = [
     "render_email_security",
     "render_email_execution_progress",
     "render_email_fix",
+    "check_ai_configured",
+    "prompt_ai_setup",
+    "ensure_ai_configured",
+    "_THEME",
 ]

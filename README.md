@@ -2,11 +2,13 @@
 
 # 🛡️ Cyberzard & CyberPanel Cleanup
 
+[![PyPI version](https://img.shields.io/pypi/v/cyberzard?color=blue&logo=pypi&logoColor=white)](https://pypi.org/project/cyberzard/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/cyberzard?color=blue&logo=pypi&logoColor=white)](https://pypi.org/project/cyberzard/)
 [![Docs](https://img.shields.io/badge/docs-Starlight%20Site-0b7285?logo=astro)](https://elwizard33.github.io/Cyberzard/)
 [![Build Docs](https://github.com/elwizard33/Cyberzard/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/elwizard33/Cyberzard/actions/workflows/deploy-docs.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python)
-![Status](https://img.shields.io/badge/Status-Alpha-orange)
+![Status](https://img.shields.io/badge/Status-Beta-yellow)
 ![AI Optional](https://img.shields.io/badge/AI-Optional-7c3aed)
 ![Offline‑first](https://img.shields.io/badge/Mode-Offline--first-495057)
 
@@ -60,7 +62,7 @@ Modern incident triage for CyberPanel:
 | Severity scoring | Critical/High/Medium/Low with rationale |
 | Evidence preservation | Optional hashing/archiving prior to actions |
 | Dry‑run planning | Generate remediation plan JSON first |
-| AI reasoning (optional) | Summaries, prioritization, advice (OpenAI/Anthropic/none) |
+| AI reasoning (optional) | Summaries, prioritization, advice (OpenAI/Anthropic/xAI/none) |
 | ReAct loop | Safe tool schema, sandboxed helpers |
 | Output | Pretty tables + JSON |
 | Chat mode | Interactive, permission‑aware assistant | Focused on CyberPanel |
@@ -69,40 +71,64 @@ Modern incident triage for CyberPanel:
 
 ### Install & Use
 
-Fast install (Linux, user‑local, no sudo required):
+#### Option 1: Install from PyPI (Recommended) 🐍
+
+```bash
+# Basic install
+pip install cyberzard
+
+# With AI provider extras
+pip install cyberzard[openai]      # OpenAI support
+pip install cyberzard[anthropic]   # Anthropic Claude support
+pip install cyberzard[xai]         # xAI Grok support
+pip install cyberzard[providers]   # All AI providers
+pip install cyberzard[all]         # Everything (AI + TUI + MCP)
+```
+
+**With pipx** (recommended for CLI tools - isolated environment):
+```bash
+pipx install cyberzard
+pipx install 'cyberzard[openai]'
+```
+
+**With uv** (fast modern package manager):
+```bash
+uv tool install cyberzard
+# Or run without installing:
+uvx cyberzard scan
+```
+
+#### Option 2: One-liner installer (Linux binary)
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/elwizard33/Cyberzard/main/scripts/install.sh)"
 ```
 
-With AI extras (choose one):
-
-```bash
-CYBERZARD_EXTRAS=openai bash -c "$(curl -fsSL https://raw.githubusercontent.com/elwizard33/Cyberzard/main/scripts/install.sh)"
-# or
-CYBERZARD_EXTRAS=anthropic bash -c "$(curl -fsSL https://raw.githubusercontent.com/elwizard33/Cyberzard/main/scripts/install.sh)"
-```
-
 Upgrade later:
 
 ```bash
+# PyPI upgrade
+pip install --upgrade cyberzard
+
+# Binary upgrade
 cyberzard --upgrade                    # quick upgrade using global flag
 cyberzard upgrade --channel stable     # explicit upgrade command
 ```
 
-Manual install (from source, editable):
+#### Option 3: Install from source (development)
 
 ```bash
 git clone https://github.com/elwizard33/Cyberzard.git
 cd Cyberzard
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -U pip setuptools wheel
-pip install -e .[openai]   # or .[anthropic] or just .
+pip install -e .[openai]   # or .[anthropic] or .[dev]
 ```
 
 Notes:
-- **Linux-only binary releases**: We publish Linux x86_64/arm64 binaries on GitHub Releases. macOS/Windows users: install from source (below). See: https://github.com/elwizard33/Cyberzard/releases
-- No PyPI publishing yet. Use the installer or source install above. PyPI releases may be added later.
+- **PyPI**: Available at https://pypi.org/project/cyberzard/
+- **Linux binaries**: Pre-built binaries available on [GitHub Releases](https://github.com/elwizard33/Cyberzard/releases)
+- **macOS/Windows**: Use PyPI install (`pip install cyberzard`)
 
 Optional TUI (terminal UI):
 
@@ -169,11 +195,17 @@ Troubleshooting
 
 | Var | Purpose | Default |
 |---|---|---|
-| CYBERZARD_MODEL_PROVIDER | `openai`, `anthropic`, `none` | `none` |
+| CYBERZARD_PROVIDER | `openai`, `anthropic`, `xai`, `none` | `none` |
 | OPENAI_API_KEY | API key when provider=openai | — |
 | ANTHROPIC_API_KEY | API key when provider=anthropic | — |
+| XAI_API_KEY | API key when provider=xai | — |
 | CYBERZARD_EVIDENCE_DIR | Evidence dir | `/var/lib/cyberzard/evidence` |
 | CYBERZARD_DRY_RUN | Global dry‑run | `true` |
+
+Check available providers:
+```bash
+cyberzard providers
+```
 
 ### Safety Model
 
@@ -181,6 +213,92 @@ Troubleshooting
 - Dry‑run by default; explicit flags to delete/kill
 - Reasoning step cap; sandboxed helpers
 - AI optional; offline works fine
+
+### MCP Server (Model Context Protocol)
+
+Cyberzard can act as an MCP server, exposing all its security tools to AI agents like Claude:
+
+```bash
+# Start MCP server (stdio transport for Claude Desktop)
+cyberzard mcp
+
+# Start with SSE transport for web clients
+cyberzard mcp --transport sse --port 8080
+
+# Start with streamable HTTP transport
+cyberzard mcp --transport streamable-http --port 8080
+```
+
+Configure in Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "cyberzard": {
+      "command": "cyberzard",
+      "args": ["mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Available tools via MCP:
+- `scan_server` - Full security scan
+- `read_file` - Safe file reading
+- `propose_remediation` - Generate remediation plans
+- CyberPanel management (websites, databases, email, DNS, SSL, backups, firewall)
+
+### CyberPanel Integration
+
+Cyberzard integrates with CyberPanel's REST API for server management:
+
+```bash
+# Set CyberPanel credentials
+export CYBERPANEL_HOST=https://your-server:8090
+export CYBERPANEL_USER=admin
+export CYBERPANEL_PASS=your-password
+
+# Use via chat mode
+cyberzard chat
+> List all websites on this server
+> Create a new database called myapp_db
+
+# Or programmatically in Python
+from cyberzard.cyberpanel import CyberPanelClient
+client = CyberPanelClient()
+websites = await client.list_websites()
+```
+
+Supported operations:
+- **Websites**: List, create, delete, suspend/unsuspend
+- **Databases**: List, create, delete MySQL/MariaDB databases
+- **Email**: Accounts, forwarders, DKIM
+- **DNS**: Records management
+- **SSL**: Issue/renew certificates
+- **Firewall**: CSF rules, block/unblock IPs
+- **Backups**: Create, restore, schedule
+
+### Enhanced TUI (Terminal UI)
+
+The enhanced TUI provides a split-panel chat interface:
+
+```bash
+# Install TUI dependencies
+pip install 'cyberzard[tui]'
+
+# Run chat TUI
+cyberzard chat --tui
+
+# Or legacy scan TUI
+cyberzard tui
+```
+
+Features:
+- **Split layout**: Conversation on left, tools on right
+- **Real-time tool tracking**: See tool calls as they execute
+- **Streaming responses**: Watch AI responses as they generate
+- **Keyboard shortcuts**: Ctrl+L (clear), Ctrl+T (toggle tools), q (quit)
 
 ---
 

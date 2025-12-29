@@ -6,8 +6,39 @@ description: CLI command reference
 # Commands
 
 Global flags:
-- `--provider none|openai|anthropic` select AI provider for this run
+- `--provider none|openai|anthropic|xai` select AI provider for this run
 - `--upgrade` self-update from git checkout (see Upgrade section)
+
+## Config
+
+Interactive AI provider configuration. Guides you through setting up an API key and optionally saves it to your shell profile.
+
+```bash
+cyberzard config
+```
+
+This command:
+- Shows current provider status (installed packages, API keys)
+- Prompts you to select and configure a provider
+- Optionally saves the API key to `~/.zshrc`, `~/.bashrc`, etc.
+
+Use this when you first install Cyberzard or need to change your AI provider.
+
+## Providers
+
+Show available AI providers with their configuration status.
+
+```bash
+cyberzard providers
+```
+
+Output shows a table with:
+- Provider name and default model
+- Package status (✓ installed / ✗ not installed)
+- API key status (✓ configured / ✗ missing)
+- Auto-detection status (shows which provider would be used if none specified)
+
+This is useful for troubleshooting provider setup and verifying your configuration.
 
 ## Scan
 
@@ -58,22 +89,25 @@ cyberzard --provider anthropic advise
 
 ## Agent
 
-Ask the minimal local agent to perform actions with tools.
+Ask the minimal local agent to perform actions with tools. **Requires AI to be configured.**
 
 ```bash
 cyberzard agent "scan the server"
 cyberzard agent --steps 5 "read /etc/passwd"
 ```
 
+If AI is not configured, you'll be prompted to set it up interactively.
 
 Run `cyberzard --help` for full list.
 
 | Command | Purpose | Key Options |
 |---------|---------|-------------|
+| `config` | Interactive AI provider setup | — |
 | `scan` | Run all scanners, list findings | `--json`, `--verify/--no-verify`, `--auto-approve`, `--max-probes` |
 | `advise` | Generate concise advice from scan | `--json`, `--include-encrypted` |
 | `agent` | Minimal ReAct loop over safe tools | `--steps N`, `--show-plan` |
 | `chat` | Interactive chat with permission-gated tools & SQLite history | `--verify/--no-verify`, `--auto-approve`, `--max-probes`, `--session` |
+| `providers` | Show AI provider status | — |
 | `show-prompt` | Print the agent system prompt | — |
 | `version` | Show version | — |
 | `upgrade` | Self-update from git checkout | — |

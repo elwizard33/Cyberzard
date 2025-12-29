@@ -8,10 +8,29 @@ import sys
 
 # --- LangChain/LangGraph agent integration ---
 import subprocess
-from langchain.agents import create_openai_tools_agent as create_agent
-from langchain.tools import tool
-from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain_openai import ChatOpenAI
+
+# Try importing from langchain core first (newer versions)
+try:
+    from langchain.agents import create_openai_tools_agent as create_agent
+except ImportError:
+    try:
+        from langchain_core.agents import create_openai_tools_agent as create_agent
+    except ImportError:
+        # Fallback: define a no-op if agent not available
+        def create_agent(*args, **kwargs):
+            raise ImportError("LangChain agent support not available. Install langchain.")
+
+try:
+    from langchain.tools import tool
+except ImportError:
+    from langchain_core.tools import tool
+
+try:
+    from langchain_community.chat_message_histories import SQLChatMessageHistory
+except ImportError:
+    # Fallback: disable SQL history if not available
+    SQLChatMessageHistory = None
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 import sqlite3
@@ -74,12 +93,31 @@ def _list_sessions() -> list[str]:
 # Lazy initialization - only create when needed
 _model = None
 _agent = None
+_active_provider: str | None = None
 
 def get_model():
-    global _model
+    """Get the LLM model, auto-detecting the best available provider."""
+    global _model, _active_provider
     if _model is None:
-        _model = ChatOpenAI(temperature=0)
+        from .models.selector import ModelSelector
+        selector = ModelSelector()
+        provider = selector.get_default_provider()
+        if not provider:
+            raise RuntimeError(
+                "No AI provider configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or XAI_API_KEY."
+            )
+        _model = selector.create_model(
+            provider=provider,
+            model=None,  # Use provider's default model
+            temperature=0,
+            streaming=False
+        )
+        _active_provider = provider
     return _model
+
+def get_active_provider() -> str | None:
+    """Return the active provider name, or None if model not yet initialized."""
+    return _active_provider
 
 def get_agent():
     global _agent
@@ -98,7 +136,15 @@ def get_agent():
     return _agent
 
 def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 5, session_id: str = "default") -> None:
-    print(f"Cyberzard AI Chat (LangChain agent) [session: {session_id}]. Type 'quit' to exit. Commands: /clear, /history [n], /sessions, /switch <id> - chat.py:90")
+    # Initialize model early to detect provider
+    try:
+        get_model()
+        provider_info = f"provider: {get_active_provider()}"
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return
+    
+    print(f"Cyberzard AI Chat (LangChain agent) [{provider_info}] [session: {session_id}]. Type 'quit' to exit. Commands: /clear, /history [n], /sessions, /switch <id>")
     # Create a chat history instance for this session
     chat_history = SQLChatMessageHistory(session_id=session_id, connection_string=f"sqlite:///{DB_PATH}")
     while True:

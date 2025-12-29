@@ -12,7 +12,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Static, DataTable
 from textual.reactive import reactive
 
-from .agent_engine.tools import scan_server, propose_remediation
+from ..agent_engine.tools import scan_server, propose_remediation
 
 
 class ScanApp(App):
@@ -73,8 +73,3 @@ class ScanApp(App):
 def run_scan_tui() -> None:
     """Run the scan-focused TUI."""
     ScanApp().run()
-
-
-def run_tui() -> None:
-    """Run the default TUI (scan mode for backward compatibility)."""
-    run_scan_tui()

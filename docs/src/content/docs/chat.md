@@ -69,12 +69,21 @@ When chat needs to use a tool (e.g., scan, read file, limited probes), it asks f
 Chat works offline. If you set a provider, advice summaries may be AI‑enriched.
 
 ```bash
-export CYBERZARD_MODEL_PROVIDER=openai
+export CYBERZARD_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 cyberzard chat
 ```
 
-Supported: `none` (default), `openai`, `anthropic`.
+Or with xAI (Grok):
+```bash
+export CYBERZARD_PROVIDER=xai
+export XAI_API_KEY=xai-...
+cyberzard chat
+```
+
+Supported: `none` (default), `openai`, `anthropic`, `xai`.
+
+Use `cyberzard providers` to check which providers are available on your system.
 
 ## Troubleshooting
 

@@ -26,8 +26,13 @@ dist/
 # Misc
 .DS_Store
 .shrimp-data/
+.github/agents/
 docs/node_modules/
 docs/.astro/
 docs/dist/
 docs/site/
 docs/starlight/
+/.shrimp-data/
+/.github/agents/
+cyberpanel/
+/cyberpanel

@@ -9,17 +9,36 @@ This page covers how upgrades work for different install types, what the `edge` 
 
 ## Upgrade methods
 
-Cyberzard can be installed in two main ways today:
+Cyberzard can be installed in several ways:
 
-- Git/source install (developer mode): cloned repo + `pip install -e .`
-- Binary install (Linux x86_64, PyInstaller) via our installer script or GitHub Releases
+- **PyPI install** (recommended): `pip install cyberzard`
+- **pipx install**: `pipx install cyberzard`
+- **Git/source install** (developer mode): cloned repo + `pip install -e .`
+- **Binary install** (Linux x86_64, PyInstaller) via our installer script or GitHub Releases
 
-The CLI `upgrade` command handles both paths:
+### PyPI / pipx Upgrade
+
+The simplest upgrade path:
+
+```bash
+# Standard pip
+pip install --upgrade cyberzard
+
+# With pipx
+pipx upgrade cyberzard
+
+# With uv
+uv pip install --upgrade cyberzard
+```
+
+### CLI Upgrade Command
+
+The CLI `upgrade` command handles git/source and binary installs:
 
 - Git/source: runs `git pull` (or checks out latest tag for `--channel stable`) and reinstalls with pip
 - Binary (Linux): downloads a new binary from GitHub Releases and atomically replaces the current one (verifies SHA-256 against `checksums.txt`)
 
-To upgrade the current install:
+To upgrade:
 
 - Run: `cyberzard upgrade --channel stable` to get the latest release
 - Or: `cyberzard upgrade --channel edge` to get the newest non-draft release (may be a prerelease)

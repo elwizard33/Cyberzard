@@ -20,7 +20,7 @@ from .agent_engine import (
 from .email_execute import run_guided
 from .agent_engine.provider import summarize as summarize_advice
 from .evidence import write_scan_snapshot  # will no-op if not implemented
-from .ui import render_scan_output, render_advice_output
+from .ui import render_scan_output, render_advice_output, ensure_ai_configured, prompt_ai_setup, check_ai_configured
 from .agent_engine.verify import verify_plan
 from .chat import run_chat
 from . import __version__
@@ -98,7 +98,7 @@ def _root(
     provider: Optional[str] = typer.Option(
         None,
         "--provider",
-        help="Select AI provider for this run: none, openai, anthropic.",
+        help="Select AI provider for this run: none, openai, anthropic, xai.",
         case_sensitive=False,
     ),
 ) -> None:
@@ -106,10 +106,33 @@ def _root(
     # Apply provider override early so downstream imports read the env
     if provider:
         val = provider.lower().strip()
-        if val not in {"none", "openai", "anthropic"}:
-            typer.echo("Invalid --provider value. Use: none | openai | anthropic")
+
+        # Check for valid provider names
+        if val not in {"none", "openai", "anthropic", "xai"}:
+            from rich.console import Console
+            from .ui import _THEME
+            console = Console(theme=_THEME)
+            console.print(f"[err]Invalid provider:[/err] '{provider}'")
+            console.print("Valid options: [cyan]none[/cyan] | [cyan]openai[/cyan] | [cyan]anthropic[/cyan] | [cyan]xai[/cyan]")
+            console.print("\nRun [cyan]cyberzard providers[/cyan] to see available providers.")
             raise typer.Exit(code=2)
+
+        # Validate provider is usable (package installed and API key set)
+        if val != "none":
+            from .models import ModelSelector
+            selector = ModelSelector()
+            valid, error = selector.validate_provider(val)
+            if not valid:
+                from rich.console import Console
+                from .ui import _THEME
+                console = Console(theme=_THEME)
+                console.print(f"[err]Provider error:[/err] {error}")
+                console.print("\nRun [cyan]cyberzard providers[/cyan] to see available options.")
+                raise typer.Exit(code=2)
+
+        # Set both legacy and new env vars for compatibility
         os.environ["CYBERZARD_MODEL_PROVIDER"] = val
+        os.environ["CYBERZARD_PROVIDER"] = val
     if upgrade:
         # Prefer built-in updater for frozen binaries, else git self-update
         if _updater.is_frozen():
@@ -231,6 +254,9 @@ def agent(
     show_plan: bool = typer.Option(False, "--show-plan", help="Show full reasoning JSON output"),
 ) -> None:
     """Ask the agent to reason with available tools."""
+    # Ensure AI is configured before running agent
+    ensure_ai_configured(require=True, command_name="cyberzard agent")
+
     result = run_agent(user_query=query, max_steps=steps)
     if show_plan:
         typer.echo(json.dumps(result, indent=2))
@@ -258,6 +284,120 @@ def version() -> None:
         except Exception:
             v = "unknown"
     typer.echo(f"cyberzard version {v}")
+
+
+@app.command()
+def providers() -> None:
+    """List available AI model providers and their status.
+
+    Shows all supported LLM providers (OpenAI, Anthropic, xAI) with:
+    - Installation status (package installed)
+    - API key status (environment variable set)
+    - Default model for each provider
+    """
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    from .models import ModelSelector, get_provider
+    from .ui import _THEME
+
+    console = Console(theme=_THEME)
+    selector = ModelSelector()
+    available = selector.detect_available_providers()
+
+    # Create styled table
+    table = Table(title="AI Model Providers", border_style="cyan")
+    table.add_column("Provider", style="cyan bold")
+    table.add_column("Package", style="dim")
+    table.add_column("Installed", justify="center")
+    table.add_column("API Key", justify="center")
+    table.add_column("Default Model", style="info")
+
+    for provider_key, installed, has_key in available:
+        info = get_provider(provider_key)
+        if not info:
+            continue
+
+        # Status icons with colors
+        installed_icon = Text("✓", style="ok") if installed else Text("✗", style="err")
+        key_icon = Text("✓", style="ok") if has_key else Text("✗", style="warn")
+
+        table.add_row(
+            info.name,
+            info.package,
+            installed_icon,
+            key_icon,
+            info.default_model,
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    # Show current default provider
+    default = selector.get_default_provider()
+    if default:
+        info = get_provider(default)
+        console.print(f"[ok]Active provider:[/ok] {info.name if info else default}")
+    else:
+        console.print("[warn]No provider configured.[/warn] Set an API key environment variable:")
+        console.print("  • OPENAI_API_KEY     - for OpenAI (GPT models)")
+        console.print("  • ANTHROPIC_API_KEY  - for Anthropic (Claude models)")
+        console.print("  • XAI_API_KEY        - for xAI (Grok models)")
+        console.print()
+        console.print("Run [cyan]cyberzard config[/cyan] for interactive setup.")
+
+
+@app.command()
+def config() -> None:
+    """Interactive AI provider configuration.
+
+    Guides you through setting up an AI provider (OpenAI, Anthropic, or xAI)
+    with options to save the API key to your shell profile for persistence.
+
+    This command:
+    - Shows current provider status
+    - Prompts for API key if needed
+    - Optionally saves to ~/.zshrc, ~/.bashrc, etc.
+    """
+    from rich.console import Console
+    from .ui import _THEME
+
+    console = Console(theme=_THEME)
+
+    # Check current status first
+    is_configured, provider, _ = check_ai_configured()
+
+    if is_configured:
+        from .models import get_provider
+        info = get_provider(provider) if provider else None
+        console.print()
+        console.print(f"[ok]✓ AI already configured![/ok]")
+        console.print(f"   Provider: [cyan]{info.name if info else provider}[/cyan]")
+        console.print()
+
+        from rich.prompt import Confirm
+        reconfigure = Confirm.ask("Reconfigure anyway?", default=False)
+        if not reconfigure:
+            console.print("[info]No changes made.[/info]")
+            return
+
+    # Run interactive setup
+    success, new_provider = prompt_ai_setup(skip_if_configured=False)
+
+    if success:
+        console.print()
+        console.print("[ok]✓ Configuration complete![/ok]")
+        console.print()
+        console.print("Try these commands:")
+        console.print("  [cyan]cyberzard agent \"Summarize security risks\"[/cyan]")
+        console.print("  [cyan]cyberzard chat[/cyan]")
+        console.print("  [cyan]cyberzard advise[/cyan]")
+    else:
+        console.print()
+        console.print("[info]AI features will be limited until configured.[/info]")
+        console.print("Run [cyan]cyberzard config[/cyan] anytime to set up.")
 
 
 @app.command()
@@ -322,6 +462,11 @@ def advise(
     ),
 ) -> None:
     """Run a scan and print concise provider-based advice."""
+    # Check for AI - advise works best with AI but has fallback
+    is_ai_ready, _ = ensure_ai_configured(require=False, command_name="cyberzard advise")
+    if not is_ai_ready:
+        typer.echo("[info] Running in limited mode without AI. Configure with: cyberzard config[/info]")
+
     typer.echo("🧠 Generating advice from scan...")
     results = scan_server(include_encrypted=include_encrypted)
     try:
@@ -499,6 +644,9 @@ def chat(
     session: str = typer.Option("default", "--session", help="Conversation session id for persisted history"),
 ) -> None:
     """Interactive AI-powered chat (LangChain agent mode)."""
+    # Ensure AI is configured before starting chat
+    ensure_ai_configured(require=True, command_name="cyberzard chat")
+
     typer.echo("Launching Cyberzard AI agent chat (LangChain mode)...")
     run_chat(verify=verify, auto_approve=auto_approve, max_probes=max_probes, session_id=session)
 
@@ -554,6 +702,81 @@ def n8n_setup(
         else:
             typer.echo("❌ Apply failed")
             raise typer.Exit(code=1)
+
+
+@app.command("mcp")
+def mcp_serve(
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        "-t",
+        help="Transport type: stdio, sse, or streamable-http",
+    ),
+    port: int = typer.Option(
+        8090,
+        "--port",
+        "-p",
+        help="Port to listen on (for HTTP/SSE transports)",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host to bind to (for HTTP/SSE transports)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose logging",
+    ),
+) -> None:
+    """Start Cyberzard as an MCP server for AI agents.
+
+    The MCP (Model Context Protocol) server allows AI agents like Claude
+    to use Cyberzard's security tools through a standardized protocol.
+
+    Transport options:
+      - stdio: Standard input/output (default, for Claude Desktop)
+      - sse: Server-Sent Events over HTTP
+      - streamable-http: Streamable HTTP (recommended for web clients)
+
+    Examples:
+      cyberzard mcp                          # Start with stdio (for Claude Desktop)
+      cyberzard mcp -t sse -p 8090           # Start SSE server on port 8090
+      cyberzard mcp -t streamable-http -p 9000  # Start HTTP server
+    """
+    import logging
+
+    # Configure logging
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    # Validate transport
+    valid_transports = {"stdio", "sse", "streamable-http"}
+    if transport not in valid_transports:
+        typer.echo(f"Invalid transport: {transport}. Use: {', '.join(valid_transports)}")
+        raise typer.Exit(code=1)
+
+    try:
+        from .mcp.server import run_mcp_server
+
+        typer.echo(f"🚀 Starting Cyberzard MCP server ({transport})...")
+        if transport != "stdio":
+            typer.echo(f"   Listening on {host}:{port}")
+
+        run_mcp_server(transport=transport, host=host, port=port)
+    except KeyboardInterrupt:
+        typer.echo("\n👋 MCP server stopped.")
+    except ImportError as e:
+        typer.echo(f"❌ MCP dependencies not installed. Run: pip install 'cyberzard[mcp]'")
+        typer.echo(f"   Error: {e}")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        typer.echo(f"❌ MCP server error: {e}")
+        raise typer.Exit(code=1)
 
 
 def main() -> None:  # pragma: no cover

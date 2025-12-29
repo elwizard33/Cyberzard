@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.16] - 2024-12-29
+### Added
+- **PyPI Publishing**: New GitHub Actions workflow for automated PyPI publishing with trusted publishing (OIDC)
+- **Interactive AI Setup**: New `cyberzard config` command for guided AI provider configuration
+  - Shows provider status (packages installed, API keys configured)
+  - Prompts for API key with secure hidden input
+  - Optionally saves to shell profile (`~/.zshrc`, `~/.bashrc`, etc.)
+- **Pre-action AI Verification**: Commands that require AI (`agent`, `chat`) now check configuration and offer setup
+- **Model Selector System**: New unified model selection with `ModelSelector` class
+  - Supports OpenAI, Anthropic, and xAI (Grok) providers
+  - Auto-detection of available providers
+  - Provider validation with helpful error messages
+- **MCP Server**: Model Context Protocol server for AI agent integration (`cyberzard mcp`)
+- **Unified Tool System**: Refactored tool registry with schemas and unified interface
+- **TUI Improvements**: Enhanced terminal UI with better provider status display
+
+### Changed
+- Installation docs now recommend PyPI as primary method (`pip install cyberzard`)
+- README badges updated: added PyPI version/downloads, changed status to Beta
+- `cyberzard advise` now shows warning when AI not configured but continues in limited mode
+- `cyberzard providers` command now suggests `cyberzard config` for setup
+
+### Fixed
+- Agent module refactored for better modularity and testability
+
 ## [0.1.15] - 2024-09-18
 ### Fixed
 - Switch back to ubuntu-22.04 with --strip flag for better runner availability
