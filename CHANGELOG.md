@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.17] - 2024-12-29
+### Fixed
+- `cyberzard config`: Validate API key before saving
+  - Format validation (checks key prefix for OpenAI/Anthropic)
+  - Tests API key with actual API call before accepting
+  - Better UX: note that input is hidden, retry up to 3 times
+  - Prevents empty keys from being saved
+  - Shows clear error messages for invalid/failed keys
+
 ## [0.1.16] - 2024-12-29
 ### Added
 - **PyPI Publishing**: New GitHub Actions workflow for automated PyPI publishing with trusted publishing (OIDC)
