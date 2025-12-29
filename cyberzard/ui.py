@@ -367,21 +367,60 @@ def prompt_ai_setup(skip_if_configured: bool = True) -> Tuple[bool, Optional[str
     url = urls.get(selected_key, "your provider's website")
     cons.print(f"  [cyan]{url}[/cyan]")
     cons.print()
+    cons.print("[info]Note: Input is hidden for security. Paste your key and press Enter.[/info]")
+    cons.print()
 
-    try:
-        api_key = Prompt.ask(
-            f"Enter your {selected_info.api_key_env}",
-            password=True,  # Hide input
-        )
-    except (KeyboardInterrupt, EOFError):
-        cons.print("\n[info]Setup cancelled.[/info]")
+    # Try up to 3 times to get a valid key
+    max_attempts = 3
+    api_key = None
+
+    for attempt in range(max_attempts):
+        try:
+            entered_key = Prompt.ask(
+                f"Enter your {selected_info.api_key_env}",
+                password=True,  # Hide input
+            )
+        except (KeyboardInterrupt, EOFError):
+            cons.print("\n[info]Setup cancelled.[/info]")
+            return False, None
+
+        if not entered_key or not entered_key.strip():
+            cons.print("[warn]No key entered.[/warn] Please paste your API key and press Enter.")
+            if attempt < max_attempts - 1:
+                cons.print(f"[info]Attempts remaining: {max_attempts - attempt - 1}[/info]")
+            continue
+
+        entered_key = entered_key.strip()
+
+        # Basic format validation
+        key_valid, key_error = _validate_api_key_format(selected_key, entered_key)
+        if not key_valid:
+            cons.print(f"[warn]{key_error}[/warn]")
+            if attempt < max_attempts - 1:
+                cons.print(f"[info]Attempts remaining: {max_attempts - attempt - 1}[/info]")
+            continue
+
+        # Test the API key with a simple request
+        cons.print("[info]Testing API key...[/info]")
+        test_ok, test_error = _test_api_key(selected_key, entered_key)
+
+        if test_ok:
+            cons.print("[ok]✓ API key is valid![/ok]")
+            api_key = entered_key
+            break
+        else:
+            cons.print(f"[err]✗ API key test failed: {test_error}[/err]")
+            if attempt < max_attempts - 1:
+                cons.print(f"[info]Attempts remaining: {max_attempts - attempt - 1}[/info]")
+                retry = Confirm.ask("Try again?", default=True)
+                if not retry:
+                    cons.print("[info]Setup cancelled.[/info]")
+                    return False, None
+
+    if not api_key:
+        cons.print("[err]Failed to configure API key after multiple attempts.[/err]")
+        cons.print("Please verify your API key is correct and try again.")
         return False, None
-
-    if not api_key or not api_key.strip():
-        cons.print("[warn]No key entered. Setup cancelled.[/warn]")
-        return False, None
-
-    api_key = api_key.strip()
 
     # Set the environment variable for this session
     os.environ[selected_info.api_key_env] = api_key
@@ -411,6 +450,121 @@ def prompt_ai_setup(skip_if_configured: bool = True) -> Tuple[bool, Optional[str
     return True, selected_key
 
 
+def _validate_api_key_format(provider: str, key: str) -> Tuple[bool, str]:
+    """Validate API key format before testing.
+
+    Args:
+        provider: Provider key (openai, anthropic, xai)
+        key: The API key to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not key:
+        return False, "API key is empty"
+
+    if len(key) < 10:
+        return False, "API key is too short"
+
+    # Provider-specific format checks
+    if provider == "openai":
+        if not (key.startswith("sk-") or key.startswith("sk-proj-")):
+            return False, "OpenAI keys typically start with 'sk-' or 'sk-proj-'"
+    elif provider == "anthropic":
+        if not key.startswith("sk-ant-"):
+            return False, "Anthropic keys typically start with 'sk-ant-'"
+    # xAI doesn't have a standard prefix
+
+    return True, ""
+
+
+def _test_api_key(provider: str, key: str) -> Tuple[bool, str]:
+    """Test if an API key is valid by making a simple API call.
+
+    Args:
+        provider: Provider key (openai, anthropic, xai)
+        key: The API key to test
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    import httpx
+
+    try:
+        if provider == "openai":
+            # Test with models endpoint (lightweight)
+            response = httpx.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                return True, ""
+            elif response.status_code == 401:
+                return False, "Invalid API key"
+            elif response.status_code == 429:
+                return True, ""  # Rate limited but key is valid
+            else:
+                return False, f"API error: {response.status_code}"
+
+        elif provider == "anthropic":
+            # Test with a minimal completion request
+            response = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                },
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                return True, ""
+            elif response.status_code == 401:
+                return False, "Invalid API key"
+            elif response.status_code == 429:
+                return True, ""  # Rate limited but key is valid
+            else:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", str(response.status_code))
+                    return False, f"API error: {error_msg}"
+                except Exception:
+                    return False, f"API error: {response.status_code}"
+
+        elif provider == "xai":
+            # xAI uses OpenAI-compatible API
+            response = httpx.get(
+                "https://api.x.ai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                return True, ""
+            elif response.status_code == 401:
+                return False, "Invalid API key"
+            elif response.status_code == 429:
+                return True, ""  # Rate limited but key is valid
+            else:
+                return False, f"API error: {response.status_code}"
+
+        else:
+            # Unknown provider, skip validation
+            return True, ""
+
+    except httpx.TimeoutException:
+        return False, "Connection timed out. Check your internet connection."
+    except httpx.ConnectError:
+        return False, "Could not connect to API. Check your internet connection."
+    except Exception as e:
+        return False, f"Validation error: {str(e)}"
+
+
 def _save_to_shell_profile(env_var: str, value: str) -> Optional[str]:
     """Save an environment variable to the user's shell profile.
 
@@ -421,7 +575,6 @@ def _save_to_shell_profile(env_var: str, value: str) -> Optional[str]:
     Returns:
         Path to the file that was modified, or None if failed
     """
-    import os
     from pathlib import Path
 
     home = Path.home()
