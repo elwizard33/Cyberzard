@@ -8,4 +8,4 @@ dev version string.
 __all__ = ["__version__"]
 
 # Default development version; CI will replace this with a tagged version.
-__version__ = "0.1.19"
+__version__ = "0.1.20"

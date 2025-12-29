@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.20] - 2024-12-29
+### Fixed
+- **Chat agent**: Use correct `prompt` parameter for LangGraph `create_react_agent`
+  - `state_modifier` is deprecated, now using `prompt` with `SystemMessage`
+
 ## [0.1.19] - 2024-12-29
 ### Fixed
 - **Chat agent**: Use modern LangGraph `create_react_agent` instead of deprecated LangChain AgentExecutor

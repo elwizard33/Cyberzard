@@ -141,8 +141,9 @@ def get_agent():
         system_prompt = "You are a helpful CLI agent that can run, debug, and complete shell commands. Use tools to assist the user."
         
         if _use_langgraph:
-            # Modern LangGraph approach - simpler and more reliable
-            _agent = _create_react_agent(model, tools, state_modifier=system_prompt)
+            # Modern LangGraph approach - use prompt parameter (not state_modifier)
+            from langchain_core.messages import SystemMessage
+            _agent = _create_react_agent(model, tools, prompt=SystemMessage(content=system_prompt))
         else:
             # Legacy LangChain approach
             create_openai_tools_agent, AgentExecutor = _create_react_agent
