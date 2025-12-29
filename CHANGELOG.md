@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.1.18] - 2024-12-29
+### Fixed
+- **Chat agent**: Fixed `LangChain agent support not available` error
+  - Properly import and use `AgentExecutor` wrapper for the tools agent
+  - Chat now correctly invokes the agent with tool support
+- **Deprecation warning**: Use `connection` instead of deprecated `connection_string` for SQLChatMessageHistory
+- **Code cleanup**: Removed debug line markers from chat output
+
 ## [0.1.17] - 2024-12-29
 ### Fixed
 - `cyberzard config`: Validate API key before saving

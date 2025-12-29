@@ -9,16 +9,23 @@ import sys
 # --- LangChain/LangGraph agent integration ---
 import subprocess
 
-# Try importing from langchain core first (newer versions)
+# Try importing from langchain (newer versions)
+_create_agent = None
+_AgentExecutor = None
+
 try:
-    from langchain.agents import create_openai_tools_agent as create_agent
+    from langchain.agents import create_openai_tools_agent, AgentExecutor
+    _create_agent = create_openai_tools_agent
+    _AgentExecutor = AgentExecutor
 except ImportError:
     try:
-        from langchain_core.agents import create_openai_tools_agent as create_agent
+        # Try alternate import paths
+        from langchain_core.agents import create_openai_tools_agent
+        from langchain.agents import AgentExecutor
+        _create_agent = create_openai_tools_agent
+        _AgentExecutor = AgentExecutor
     except ImportError:
-        # Fallback: define a no-op if agent not available
-        def create_agent(*args, **kwargs):
-            raise ImportError("LangChain agent support not available. Install langchain.")
+        pass  # Will be handled at runtime
 
 try:
     from langchain.tools import tool
@@ -122,7 +129,15 @@ def get_active_provider() -> str | None:
 def get_agent():
     global _agent
     if _agent is None:
+        # Check if agent imports are available
+        if _create_agent is None or _AgentExecutor is None:
+            raise ImportError(
+                "LangChain agent support not available. "
+                "Install with: pip install langchain langchain-openai"
+            )
+        
         model = get_model()
+        tools = [run_shell_command, debug_shell_command, complete_shell_command]
         system_prompt = "You are a helpful CLI agent that can run, debug, and complete shell commands. Use tools to assist the user."
         
         # Build a proper chat prompt template for the tools agent
@@ -132,7 +147,9 @@ def get_agent():
             MessagesPlaceholder("agent_scratchpad"),
         ])
         
-        _agent = create_agent(model, tools=[run_shell_command, debug_shell_command, complete_shell_command], prompt=prompt)
+        # Create the agent and wrap in executor
+        agent = _create_agent(model, tools=tools, prompt=prompt)
+        _agent = _AgentExecutor(agent=agent, tools=tools, verbose=False)
     return _agent
 
 def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 5, session_id: str = "default") -> None:
@@ -146,31 +163,31 @@ def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 
     
     print(f"Cyberzard AI Chat (LangChain agent) [{provider_info}] [session: {session_id}]. Type 'quit' to exit. Commands: /clear, /history [n], /sessions, /switch <id>")
     # Create a chat history instance for this session
-    chat_history = SQLChatMessageHistory(session_id=session_id, connection_string=f"sqlite:///{DB_PATH}")
+    chat_history = SQLChatMessageHistory(session_id=session_id, connection=f"sqlite:///{DB_PATH}")
     while True:
         try:
             user = input("You: ")
         except (KeyboardInterrupt, EOFError):
-            print("\nGoodbye. - chat.py:97")
+            print("\nGoodbye.")
             break
         if not user.strip():
             continue
         if user.strip().lower() in {"quit", "exit", ":q", "/q"}:
-            print("Exiting chat. - chat.py:102")
+            print("Exiting chat.")
             break
         # Built-in commands
         if user.strip().startswith("/clear"):
             try:
                 # Best effort clear
                 chat_history.clear()
-                print("History cleared. - chat.py:109")
+                print("History cleared.")
             except Exception:
                 # Fallback: re-init local history
                 try:
-                    chat_history = SQLChatMessageHistory(session_id=session_id, connection_string=f"sqlite:///{DB_PATH}")
-                    print("History reset. - chat.py:114")
+                    chat_history = SQLChatMessageHistory(session_id=session_id, connection=f"sqlite:///{DB_PATH}")
+                    print("History reset.")
                 except Exception:
-                    print("Unable to clear history. - chat.py:116")
+                    print("Unable to clear history.")
             continue
         if user.strip().startswith("/history"):
             parts = user.strip().split()
@@ -182,30 +199,30 @@ def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 
             for m in msgs[-n:]:
                 role = "assistant" if m.type == "ai" else ("user" if m.type == "human" else m.type)
                 content = getattr(m, "content", "")
-                print(f"{role}> {content} - chat.py:128")
+                print(f"{role}> {content}")
             continue
         if user.strip().startswith("/sessions"):
             sessions = _list_sessions()
             if not sessions:
-                print("No sessions found. - chat.py:133")
+                print("No sessions found.")
             else:
-                print("Sessions: - chat.py:135")
+                print("Sessions:")
                 for s in sessions:
                     marker = "*" if s == session_id else " "
-                    print(f"{marker} {s} - chat.py:138")
+                    print(f"{marker} {s}")
             continue
         if user.strip().startswith("/switch"):
             parts = user.strip().split(maxsplit=1)
             if len(parts) < 2 or not parts[1].strip():
-                print("Usage: /switch <session_id> - chat.py:143")
+                print("Usage: /switch <session_id>")
                 continue
             new_id = parts[1].strip()
             try:
-                chat_history = SQLChatMessageHistory(session_id=new_id, connection_string=f"sqlite:///{DB_PATH}")
+                chat_history = SQLChatMessageHistory(session_id=new_id, connection=f"sqlite:///{DB_PATH}")
                 session_id = new_id
-                print(f"Switched to session: {session_id} - chat.py:149")
+                print(f"Switched to session: {session_id}")
             except Exception as e:
-                print(f"Unable to switch session: {e} - chat.py:151")
+                print(f"Unable to switch session: {e}")
             continue
         # Agent invocation
         # Load history (list[BaseMessage]) and append the current user message
@@ -221,8 +238,8 @@ def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 
             answer = getattr(response, "content") or ""
         elif isinstance(response, dict):
             answer = (
-                response.get("final")
-                or response.get("output")
+                response.get("output")
+                or response.get("final")
                 or response.get("answer")
                 or ""
             )
@@ -239,4 +256,4 @@ def run_chat(verify: bool = True, auto_approve: bool = False, max_probes: int = 
         except Exception:
             pass
 
-        print("Agent: - chat.py:184", answer)
+        print(f"Agent: {answer}")
