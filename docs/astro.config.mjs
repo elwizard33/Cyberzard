@@ -1,14 +1,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// GitHub Pages project site settings
-const repo = 'Cyberzard';
-const owner = 'elwizard33';
-const site = `https://${owner}.github.io/${repo}`;
+// Custom domain for documentation
+const site = 'https://docs.cyberzard.com';
 
 export default defineConfig({
   site,
-  base: `/${repo}/`,
+  // No base path needed with custom domain
   integrations: [
     starlight({
       title: 'Docs',
